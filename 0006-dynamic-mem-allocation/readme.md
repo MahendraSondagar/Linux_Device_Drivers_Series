@@ -115,64 +115,124 @@ kfree(buf);
 
 ---
 
-##  GFP (Get Free Page) Flags
+#  Understanding GFP Flags in Linux Kernel
 
-These flags tell the kernel **how** to allocate memory.
+The **GFP flag** tells the kernel **how** and **from where** to allocate memory.
 
-| Flag | Meaning |
-|------|----------|
-| `GFP_KERNEL` | Normal allocation, may sleep |
-| `GFP_ATOMIC` | Non-sleeping allocation (interrupt context) |
-| `GFP_NOWAIT` | Don’t wait at all |
-| `GFP_NOIO` | Don’t initiate I/O |
-| `GFP_NOFS` | Don’t initiate filesystem ops |
-| `GFP_DMA` | Allocate memory for DMA (low memory zone) |
-| `GFP_HIGHUSER` | Allocate high memory |
-
-###  Simple Rule
-> If you can sleep — use `GFP_KERNEL`  
-> If you can’t sleep — use `GFP_ATOMIC`
+GFP = **Get Free Page** flags.  
+They control:
+- Whether the allocator can **sleep (block)**.
+- Whether it can **trigger I/O or filesystem operations**.
+- Which **memory zone** it can use.
 
 ---
 
-##  GFP Flags Explained with Examples
+##  The Core Concept — "Can the code sleep?"
 
-### `GFP_KERNEL`
-Used in normal process context (can sleep).
+The **biggest difference** between GFP flags is:
+
+> ❓ Can the kernel put the current process to sleep while waiting for free memory?
+
+- ✅ **If yes → Use `GFP_KERNEL`**
+- ❌ **If no → Use `GFP_ATOMIC`**
+
+---
+
+##  1. `GFP_KERNEL`
+Normal kernel memory allocation. Can sleep and perform I/O.
+
+Example:
 ```c
 void *buf = kmalloc(1024, GFP_KERNEL);
 ```
 
-### `GFP_ATOMIC`
-Used in interrupt or atomic context (cannot sleep).
+---
+
+##  2. `GFP_ATOMIC`
+Used in interrupt or atomic context where the code **cannot sleep**.
+
+Example:
 ```c
 irqreturn_t my_irq_handler(int irq, void *dev_id)
 {
     char *data = kmalloc(256, GFP_ATOMIC);
     if (!data)
-        printk(KERN_ERR "Failed in IRQ!
-");
+        printk(KERN_ERR "Allocation failed in IRQ!\n");
     return IRQ_HANDLED;
 }
 ```
 
-### `GFP_NOIO`
-Used in block drivers to avoid recursive I/O.
+---
+
+##  3. `GFP_NOWAIT`
+Do not wait at all — return immediately if memory is not available.
+
+Example:
+```c
+void *ptr = kmalloc(512, GFP_NOWAIT);
+if (!ptr)
+    printk(KERN_WARNING "Could not allocate memory\n");
+```
+
+---
+
+##  4. `GFP_NOIO`
+Do not initiate any I/O operations while allocating memory.
+
+Used in block I/O paths to avoid recursive calls.
+
+Example:
 ```c
 void *ptr = kmalloc(1024, GFP_NOIO);
 ```
 
-### `GFP_NOFS`
-Used in filesystem code to avoid recursion.
+---
+
+##  5. `GFP_NOFS`
+Avoid triggering filesystem operations during allocation.
+
+Used inside filesystem code.
+
+Example:
 ```c
 void *ptr = kmalloc(2048, GFP_NOFS);
 ```
 
-### `GFP_DMA`
-Used for legacy DMA hardware.
+---
+
+##  6. `GFP_DMA`
+Allocate memory from DMA zone for devices requiring low memory addresses.
+
+Example:
 ```c
 void *dma_buf = kmalloc(4096, GFP_KERNEL | GFP_DMA);
 ```
+
+---
+
+##  7. `GFP_HIGHUSER`
+Allocate memory from high memory, typically for user-space pages.
+
+---
+
+## 🧠 Quick Summary
+
+| Flag | Can Sleep? | Context | Typical Use |
+|------|-------------|----------|-------------|
+| `GFP_KERNEL` | ✅ | Process | Default for normal allocations |
+| `GFP_ATOMIC` | ❌ | Interrupt | Use in IRQ/atomic context |
+| `GFP_NOWAIT` | ❌ | Any | Non-blocking try |
+| `GFP_NOIO` | ✅ | Block I/O | Block drivers |
+| `GFP_NOFS` | ✅ | Filesystem | FS operations |
+| `GFP_DMA` | ✅ | DMA | Legacy DMA devices |
+| `GFP_HIGHUSER` | ✅ | User memory | Page cache |
+
+---
+
+##  Tip for Remembering
+
+> **If you can sleep — use `GFP_KERNEL`.**  
+> **If you can’t sleep — use `GFP_ATOMIC`.**
 
 ---
 
@@ -229,24 +289,13 @@ MODULE_DESCRIPTION("Kernel Dynamic Memory Allocation Tutorial");
 
 ---
 
-##  Summary of GFP Flags
+###  Final Tip
 
-| Flag | Can Sleep | Context | Use Case |
-|------|-------------|----------|-----------|
-| `GFP_KERNEL` | ✅ | Process | Default safe flag |
-| `GFP_ATOMIC` | ❌ | Interrupt | IRQ / Spinlocks |
-| `GFP_NOIO` | ✅ | Block I/O | Block drivers |
-| `GFP_NOFS` | ✅ | Filesystem | FS code |
-| `GFP_DMA` | ✅ | DMA | Legacy DMA devices |
-| `GFP_HIGHUSER` | ✅ | User space | Page cache |
-
----
-
-###  Tip
-> - **If you can sleep, use `GFP_KERNEL`.** 
+> - **If you can sleep, use `GFP_KERNEL`.**  
 > - **If you can’t sleep, use `GFP_ATOMIC`.**
 
 ---
 
-## Author : Mahendra Sondagar <mahendrasondagar08@gmail.com>
+## Author: MahendraSondagar <mahendrasondagar08@gmail.com>
+
 
