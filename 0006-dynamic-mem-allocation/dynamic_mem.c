@@ -6,7 +6,7 @@
 /* pointer to point the starting address of the allocated block of the memory*/
 void *ptr;
 
-static int __init module_mem_init(void)
+static int __init module_dynamic_mem_init(void)
 {
 	pr_info("Dynamically allocating the memory\r\n");
 	ptr = kmalloc(100* sizeof(int), GFP_KERNEL);
@@ -20,14 +20,14 @@ static int __init module_mem_init(void)
 	return 0;
 }
 
-static void __exit module_mem_exit(void)
+static void __exit module_dynamic_mem_exit(void)
 {
 	pr_info("De-allocating the memory\r\n");
 	kfree(ptr);
 }
 
-module_init(module_mem_init);
-module_exit(module_mem_exit);
+module_init(module_dynamic_mem_init);
+module_exit(module_dynamic_mem_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("kernel module for the DMA");
