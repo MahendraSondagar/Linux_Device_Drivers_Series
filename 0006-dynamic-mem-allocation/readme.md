@@ -1,5 +1,5 @@
 
-#Linux Kernel Dynamic Memory Allocation Tutorial
+## Linux Kernel Dynamic Memory Allocation Tutorial
 
 ---
 
@@ -249,5 +249,4 @@ MODULE_DESCRIPTION("Kernel Dynamic Memory Allocation Tutorial");
 ---
 
 ## Author : Mahendra Sondagar <mahendrasondagar08@gmail.com>
-##  End of Tutorial
 
