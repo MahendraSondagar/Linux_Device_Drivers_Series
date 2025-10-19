@@ -1,4 +1,4 @@
-obj-m += kernel-thread.o
+obj-m += kernel-thread.o kernel-thread-2.o
 ARCH=arm
 CROSS_COMPILE=arm-linux-gnueabihf-
 KERN_DIR =/home/mahi-ms/Documents/MyDrives/MyLearnings/Udemy-LDD/source/BBB-5.10.168-linux-ti-r83/
