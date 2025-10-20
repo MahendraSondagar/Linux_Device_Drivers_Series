@@ -205,7 +205,7 @@ dmesg
 
 ## 🔧 9. Detailed Description of Mutex API
 
-### 🧱 `DEFINE_MUTEX(name)`
+### `DEFINE_MUTEX(name)`
 - Defines and initializes a mutex statically at compile time.
 - Example:
   ```c
