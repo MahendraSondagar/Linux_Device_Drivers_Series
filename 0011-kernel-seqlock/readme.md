@@ -103,17 +103,133 @@ do {
 
 ---
 
-## 5. Example — Timekeeping Example (Practical Use Case)
+## 5. Sequence Example — Step by Step
+
+This section shows an explicit step-by-step change of the sequence counter across reader and writer actions, using small, discrete events so you can trace exact values.
+
+Initial state (after `seqlock_init()`):
+- `sequence = 0` (even) → no writer active.
+
+Writer A starts:
+1. `write_seqlock()` increments sequence: `0 -> 1` (odd) → writer active.
+2. Writer A updates protected data.
+3. `write_sequnlock()` increments sequence: `1 -> 2` (even) → writer finished.
+
+Reader R runs (between steps):
+- Reads `seq = 2` (even), reads data, then re-reads `seq` and sees `2` → success.
+
+Writer B starts:
+1. `write_seqlock()` increments sequence: `2 -> 3` (odd).
+2. Update data.
+3. `write_sequnlock()` increments: `3 -> 4` (even).
+
+Summary table:
+
+| Event | Sequence before | Sequence after | Note |
+|-------|------------------|----------------|------|
+| Init | - | 0 | stable |
+| Writer A start | 0 | 1 | odd → writer active |
+| Writer A end | 1 | 2 | even → stable |
+| Writer B start | 2 | 3 | odd |
+| Writer B end | 3 | 4 | even |
+
+---
+
+## 6. What Readers Do With This Sequence
+
+Reader pattern (your code uses this pattern):
+
+```c
+do {
+    seq_no = read_seqbegin(&my_seqlock);
+    g_copy = global_var;
+} while (read_seqretry(&my_seqlock, seq_no));
+```
+
+Explanation:
+- `read_seqbegin()` returns the current `sequence` (READ_ONCE) and executes a read memory barrier so subsequent reads see consistent memory.
+- The reader copies shared data.
+- `read_seqretry()` checks two things:
+  1. Was the initial `sequence` odd? If yes → a writer was active when reader started → retry.
+  2. Is the `sequence` value changed since the initial read? If yes → writer updated during read → retry.
+- Only when the sequence was even at start *and* unchanged at end does the reader accept the data.
+
+So readers never block writers — they **retry** if they detect a concurrent write.
+
+---
+
+## 7. Real-Time Example Using Your Code
+
+Using the kernel module example from earlier:
+
+```c
+seqlock_t my_seqlock;
+int global_var = 0;
+
+/* writer thread */
+write_seqlock(&my_seqlock);
+global_var++;
+write_sequnlock(&my_seqlock);
+
+/* reader thread */
+seq_no = read_seqbegin(&my_seqlock);
+g_copy = global_var;
+if (read_seqretry(&my_seqlock, seq_no)) { retry; }
+```
+
+Walkthrough (timeline):
+
+1. Start: `global_var=0`, `seq=0`.
+2. Writer increments: `seq=1`, `global_var=1`, `seq=2`.
+3. Reader calls `read_seqbegin()` and sees `seq=2` → reads `global_var=1` → `read_seqretry()` returns false → print `1`.
+4. Next writer run repeats, reader reads `2`, etc.
+
+If reader started while writer was mid-update:
+- Reader's `read_seqbegin()` returns odd `seq` or `read_seqretry()` finds change → reader retries until it sees an even unchanged `seq`.
+
+This behavior guarantees readers see a consistent snapshot of `global_var` without acquiring locks.
+
+---
+
+## 8. Visual Summary
+
+```
+Time axis:
+t0: seq=0 (even) - stable
+t1: writer starts -> write_seqlock() -> seq=1 (odd)
+t2: writer updates data (global_var++)
+t3: writer ends -> write_sequnlock() -> seq=2 (even)
+t4: reader reads: read_seqbegin() sees seq=2 -> read data -> read_seqretry() sees seq still 2 -> success
+```
+
+Key visual points:
+- Odd sequence = writer active (reader must not trust data)
+- Even sequence = stable snapshot (reader may trust if unchanged)
+- Writers increment twice per update (start/end) — so sequence monotonically increases.
+
+---
+
+## 9. Key Takeaways
+
+- **Even sequence** indicates no writer is active and data is potentially stable.
+- **Odd sequence** indicates a writer is active; readers must retry.
+- **Writers increment sequence twice** per update: once at start (even→odd), once at end (odd→even).
+- **Readers are lockless**: they don't block writers; instead they detect concurrent writes and retry.
+- **Best use cases**: timekeeping, counters, statistics — scenarios where reads are far more frequent than writes and writers can tolerate being retried.
+
+---
+
+## 10. Example — Timekeeping Example (Practical Use Case)
 
 SeqLocks are heavily used in the kernel's **timekeeping** code because time values are read extremely frequently (user `gettimeofday()`, `clock_gettime()`) while updates are relatively rare and short. This section shows a practical, compact example that mirrors how the kernel keeps a coherent snapshot of time across readers and writers.
 
-### 5.1 Problem Context
+### 10.1 Problem Context
 
 - A writer (timer interrupt or periodic kernel thread) updates `xtime`/`monotonic` fields.
 - Many readers (user-space via VDSO or kernel callers) need a consistent snapshot to compute time.
 - Blocking readers with spinlocks hurts performance; SeqLock allows lockless reads with validation.
 
-### 5.2 Data Structures
+### 10.2 Data Structures
 
 ```c
 #include <linux/seqlock.h>
@@ -127,7 +243,7 @@ struct tk_clock {
 static struct tk_clock tk;
 ```
 
-### 5.3 Writer (timer-like update)
+### 10.3 Writer (timer-like update)
 
 ```c
 void tk_update(unsigned long delta_nsec)
@@ -147,7 +263,7 @@ void tk_update(unsigned long delta_nsec)
 - `write_sequnlock()` marks end (seq becomes even).
 - `smp_wmb()` inside macros ensures write ordering.
 
-### 5.4 Reader (fast, lockless read)
+### 10.4 Reader (fast, lockless read)
 
 ```c
 void tk_read(unsigned long *sec, unsigned long *nsec)
@@ -166,7 +282,7 @@ void tk_read(unsigned long *sec, unsigned long *nsec)
 - Reader retries if a writer was active during the read.
 - This pattern ensures readers observe a coherent pair `(seconds,nsec)`.
 
-### 5.5 Integration with VDSO / user-space fast-paths
+### 10.5 Integration with VDSO / user-space fast-paths
 
 - Kernel provides values via VDSO so user-space can read time without syscalls.
 - The VDSO code performs the same `read_seqbegin()` / `read_seqretry()` logic to ensure consistent snapshots.
@@ -174,7 +290,7 @@ void tk_read(unsigned long *sec, unsigned long *nsec)
 
 ---
 
-## 6. Practical Kernel Module Example
+## 11. Practical Kernel Module Example
 
 ```c
 #include <linux/kernel.h>
@@ -239,23 +355,23 @@ module_init(module_seqlock_init);
 module_exit(module_seqlock_exit);
 
 MODULE_DESCRIPTION("Linux kernel seqlock tutorial");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.2");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Mahendra Sondagar <mahendrasondagar08@gmail.com>");
 ```
 
 ---
 
-## 7. How the Sequence Counter Changes (Even ↔ Odd)
+## 12. How the Sequence Counter Changes (Even ↔ Odd)
 
-### 7.1 Internals of `write_seqlock()`
+### 12.1 Internals of `write_seqlock()`
 ```c
 #define write_seqlock(lock) do {     spin_lock(&(lock)->lock);     (lock)->seqcount.sequence++;     smp_wmb(); } while (0)
 ```
 - Sequence increments → **even → odd**
 - Odd → means writer active
 
-### 7.2 Internals of `write_sequnlock()`
+### 12.2 Internals of `write_sequnlock()`
 ```c
 #define write_sequnlock(lock) do {     smp_wmb();     (lock)->seqcount.sequence++;     spin_unlock(&(lock)->lock); } while (0)
 ```
@@ -264,7 +380,7 @@ MODULE_AUTHOR("Mahendra Sondagar <mahendrasondagar08@gmail.com>");
 
 ---
 
-## 8. Sequence Example
+## 13. Sequence Example (Short Table)
 
 | Step | Action | Seq Number | Meaning |
 |------|---------|-------------|----------|
@@ -276,7 +392,7 @@ MODULE_AUTHOR("Mahendra Sondagar <mahendrasondagar08@gmail.com>");
 
 ---
 
-## 9. Reader Validation Logic
+## 14. Reader Validation Logic
 
 Reader uses:
 ```c
@@ -289,7 +405,7 @@ If a writer modified during read → sequence changes → retry.
 
 ---
 
-## 10. Expected Output
+## 15. Expected Output
 
 ```
 module seqlock init fun
@@ -304,7 +420,7 @@ Readers always get **consistent data snapshots**.
 
 ---
 
-## 11. Summary
+## 16. Summary
 
 | Concept | Description |
 |----------|--------------|
